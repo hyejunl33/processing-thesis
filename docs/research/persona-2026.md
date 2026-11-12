@@ -148,7 +148,79 @@
 - Behavioral History Outperforms Descriptions of the Person (2026): https://arxiv.org/html/2610.03998v1
 - Personas Are Not People: Identity as State, Not Attribute (2026): https://arxiv.org/html/2611.05292v1
 
-## 7. 라이선스 주의
+## 7. Nemotron-Personas 실사용 주의사항
+
+### 7.1 Nemotron은 "설문 패널"이 아니다
+
+NVIDIA 문서는 Nemotron-Personas를 **synthetic data / model training을 위한 seed**로 설명한다. long-context, tool-use, safety refusal, general chat 데이터를 만들기 위한 재료다. **검증된 인간 설문 응답 패널이 아니다.** 따라서 "persona에게 별점을 물어서 그 집단의 반응을 측정했다"고 주장하면 안 된다. 측정 대상은 **특정 LLM이 특정 persona conditioning에서 생성한 반응**이다.
+
+### 7.2 feature 의존성: "가정하지 말 것"의 정확한 의미
+
+Nemotron은 2단계에서 **PGM(Probabilistic Graphical Model)** 을 쓴다. 미국/한국 등의 census·행정 데이터로 age × education × occupation × marital status × geography 같은 **인구통계적 상관을 의도적으로 모델링**한다. NVIDIA 문서도 "naive independent sampling은 3살 외과의사 같은 nonsense를 만든다"고 말한다.
+
+그래서 정확한 주의는 다음과 같다.
+
+- **인구통계 feature를 독립이라고 가정하면 안 된다.** PGM이 이미 상관을 넣었다.
+- **그렇다고 모든 feature의 joint distribution이 현실과 같다고 가정해도 안 된다.** PGM이 모델링하지 않은 상관, 표본 오차, 지역/버전 차이가 있다.
+- **LLM이 생성한 서사형 필드(cultural_background, skills, hobbies, career_goals, persona)는 더 조심해야 한다.** 이들은 demographic/OCEAN seed에 조건화되어 LLM이 "그럴듯하게" 쓴 것이지, 실제 인간의 joint distribution에서 측정된 것이 아니다. 내적 일관성을 위해 오히려 **정형화(stereotype)된 조합**이 만들어진다.
+- **데이터셋에 OCEAN이 들어있다고 가정하지 마라.** Korea 데이터셋 카드의 공개 컬럼에는 OCEAN 점수가 없다. 문서의 pipeline 설명과 실제 공개 스키마를 혼동하면 안 된다.
+- **없는 조합을 임의로 만들지 마라.** 예: "19세, 은퇴, 서울, 전문직" 같은 조합을 feature를 따로 샘플링해 합성하면 PGM이 보장하지 않는 셀을 만들 수 있다. 가능하면 **실제 row를 조건화해 샘플링**하고, 셀별 n을 기록하라.
+- **feature 중요도를 상관으로 추론하지 마라.** 별점과의 상관은 LLM의 prior/stereotype일 수 있다. 필요하면 feature masking/ablation으로 확인하라.
+
+### 7.3 별점(rating) 측정의 함정
+
+- **별점은 ordinal이다.** 1–5의 평균을 실수처럼 다루지 말고, 분포/중앙값/top-2-box를 보고하라. 평균이 필요하면 ordinal regression/beta regression을 고려하라.
+- **LLM은 긍정 편향/중앙값 편향/아첨(sycophancy)을 보인다.** persona와 무관하게 4–5점에 몰릴 수 있다. "모르겠음/평가 불가" 옵션을 넣고, persona-swap과 no-persona baseline을 비교하라.
+- **scale usage bias**: persona별로 점수 사용이 다를 수 있다. (예: 고연령 persona가 더 관대) 앵커 문항/비교 문항을 넣어라.
+- **prompt/order effect**: topic을 먼저 보여주면 기대 점수를 추론한다. 순서를 랜덤화하고, 브랜드/정답 힌트를 제거하라.
+- **일관성**: temperature 0만 쓰면 다양성이 사라지고, temperature를 높이면 분산이 커진다. 여러 seed × 여러 모델로 반복하고, 모델 버전을 기록하라.
+- **unit of analysis**: persona 1개 = human 1명이 아니다. persona당 여러 번 샘플링하면 pseudo-replication이 된다. hierarchical/mixed-effects model로 persona와 prompt를 random effect로 두라.
+
+### 7.4 표집(sampling)의 함정
+
+- **목표 집단을 사후에 정의하지 마라.** 분석 전에 inclusion criteria와 비교 집단을 고정하라.
+- **교차 셀의 n을 확인하라.** "20–29세 여성 서울 거주 마케팅 종사자" 같은 셀은 1M rows에서도 작을 수 있다.
+- **가중치를 고려하라.** 목표 모집단과 데이터셋 분포가 다르면 raking/post-stratification으로 가중치를 주고, 가중치를 보고하라.
+- **다중비교를 보정하라.** 여러 하위집단을 비교하면 우연한 차이가 나온다.
+- **선택 편향**: 관심 있을 만한 persona만 골라 별점을 받으면 그건 target group의 반응이 아니라 **선택된 persona의 반응**이다.
+
+### 7.5 타당도(validity) 검증
+
+- **인간 benchmark와의 상관을 먼저 확인하라.** 같은 topic/문항을 실제 소규모 인간 집단(예: 30–50명)에게 물어 synthetic rating과의 상관/MAE를 계산하라. 상관이 낮으면 마케팅/정책 결론에 쓰면 안 된다.
+- **known-groups test**: 실제로 차이가 알려진 두 집단/두 제품으로 synthetic panel이 그 차이를 재현하는지 확인하라.
+- **persona fidelity test**: 같은 persona를 여러 번, persona를 바꿔가며, persona 없이 물어보라. persona 효과가 없으면 persona를 쓴 의미가 없다.
+- **stereotype audit**: 특정 집단의 응답이 전형적 고정관념과 과도하게 일치하는지 검토하라. LLM은 내적 일관성을 위해 stereotype을 증폭할 수 있다.
+
+### 7.6 윤리/법적 주의
+
+- **synthetic임을 공개하라.** "실제 소비자 조사"라고 표기하면 안 된다.
+- **민감한 의사결정에 쓰지 마라.** 채용, 신용, 의료, 보험 등 고위험 결정의 근거로 synthetic persona 반응을 쓰면 안 된다.
+- **이름/지역/직업이 실제 개인과 겹칠 수 있다.** synthetic이지만 실제 사람으로 오인/재식별하지 않도록 주의하라.
+- **라이선스**: Nemotron-Personas-Korea는 CC-BY-4.0 (dataset card 기준). 상업적 사용 시 attribution과 데이터셋 버전을 명시하라.
+
+## 8. "persona + 별점" synthetic audience 프로토콜 (권장)
+
+1. **연구 질문 고정**: "이 topic에 대한 target group의 반응 분포"인지, "persona별 반응 차이의 탐색"인지 먼저 정한다.
+2. **target group 정의**: inclusion/exclusion 기준, 비교 집단, 표본 크기 목표를 사전 등록한다.
+3. **persona 샘플링**: 실제 row에서 조건화해 샘플링. 셀별 n, 가중치, 데이터셋 버전을 기록한다.
+4. **자극(stimulus) 설계**: topic 설명을 중립적으로 작성하고, 브랜드/기대 효과/정답 힌트를 제거한다.
+5. **측정 도구**: 1–5 별점 + "모르겠음" + 이유 + 확신도. 가능하면 pairwise comparison/forced choice를 함께 쓴다.
+6. **모델/실행**: 2개 이상 모델, temperature 0 + 0.7, 3–5 seeds. persona 유무 ablation 포함.
+7. **인간 calibration**: 30–50명 인간 응답과 비교. 상관/MAE/순위 일치 확인.
+8. **분석**: 분포, 중앙값, top-2-box, ordinal/hierarchical model, bootstrap CI. 평균만 보고하지 않는다.
+9. **민감도 분석**: feature masking, 가중치 변경, 다른 모델, 다른 prompt.
+10. **보고**: "synthetic persona simulation"임을 명시하고, human validation 결과와 한계를 함께 쓴다.
+
+### 결과를 버려야 하는 신호
+
+- persona를 바꿔도 별점 분포가 거의 같다. (persona가 작동하지 않음)
+- 별점이 4–5에 포화된다. (변별력 없음)
+- 인간 benchmark와의 상관이 낮다. (타당도 없음)
+- 특정 셀 n이 5 미만이다. (불안정)
+- 모델 버전/prompt/seed에 따라 결론이 뒤집힌다. (취약)
+- 결과가 고정관념과 지나치게 일치한다. (stereotype amplification 의심)
+
+## 9. 라이선스 주의
 
 - Nemotron-Personas: 데이터셋별 카드 확인 (상업적 사용 가능으로 홍보되는 버전 있음).
 - PersonaFeedback: CC BY 4.0 (arXiv 기준).
