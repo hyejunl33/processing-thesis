@@ -220,7 +220,133 @@ Nemotron은 2단계에서 **PGM(Probabilistic Graphical Model)** 을 쓴다. 미
 - 모델 버전/prompt/seed에 따라 결론이 뒤집힌다. (취약)
 - 결과가 고정관념과 지나치게 일치한다. (stereotype amplification 의심)
 
-## 9. 라이선스 주의
+## 9. 타당성 확보 방법론 — Calibrated Hybrid
+
+### 9.1 냉정한 출발점
+
+- **synthetic alone은 시장/정책 결정에 쓸 수 없다.** Pew Research Center(2026)는 digital twin + extended profile + expert reflection + Claude Opus 4.6으로 미국 ATP 3개 wave를 재현했는데, 인간-합성 평균 절대오차가 **약 12%p**였다. 하위집단은 12–16%p, Hispanic World Cup 관심은 합성 97% vs 실제 42%였다. 즉 "그럴듯한" 결과가 "타당한" 결과는 아니다.
+- **synthesis alone은 편향이 크다.** Krsteski et al.(ACL 2026)은 synthesis alone의 편향이 **24–86%**였고, **rectification**을 결합하면 **5% 미만**으로 줄고 유효 표본이 최대 **14%** 증가한다고 보고한다. 핵심은 "인간 응답을 어디에 쓸 것인가"다. 모두 fine-tuning에 쓰지 말고, **대부분을 rectification에 배분**하라.
+- **타당성은 "확보"하는 것이 아니라 "가정 + 보정 + 불확실성"으로 관리하는 것**이다. 최종 추정치는 반드시 확률표본(또는 대표성 있는 인간 앵커)에 닻을 내려야 한다.
+
+### 9.2 Calibrated Hybrid pipeline (Anchor → Simulate → Rectify → Validate)
+
+```
+[1] Estimand 정의
+    - target population, subgroup, outcome (mean/share/WTP/policy support)
+    - decision threshold, 허용 오차
+        ↓
+[2] Human anchor
+    - 확률표본 또는 대표성 있는 human sample (n=100–300+)
+    - 같은 문항/같은 자극으로 측정
+        ↓
+[3] Synthetic sample
+    - persona-conditioned LLM/digital twin (N=5k–50k)
+    - 2+ models, 3–5 seeds, temperature 0 & 0.7
+        ↓
+[4] Rectification / calibration
+    - human anchor에서 bias를 추정해 synthetic estimate 보정
+    - PPI, regression calibration, isotonic, post-stratification
+        ↓
+[5] Validation
+    - predictive / distributional / substantive validity
+    - holdout human sample, known-groups, coverage
+        ↓
+[6] Decision
+    - bias-corrected estimate + 95% CI
+    - CI가 decision threshold를 넘지 못하면 human data 추가
+```
+
+### 9.3 Prediction-Powered Inference (PPI)
+
+인간 라벨이 적을 때 synthetic/ML 예측을 결합해 **유효한 신뢰구간**을 얻는 방법이다.
+
+- 전체 synthetic 표본 \(N\)에 대한 예측 \(f(X_i)\)
+- 인간 앵커 표본 \(n\)에 대한 실제 라벨 \(Y_i\)
+- PPI estimator:
+
+\[
+\hat{\theta}_{PPI} = \frac{1}{N}\sum_{i=1}^{N} f(X_i) + \frac{1}{n}\sum_{i=1}^{n}\left(Y_i - f(X_i)\right)
+\]
+
+- 앞항은 synthetic 평균, 뒤항은 human anchor에서의 **bias correction**이다. synthetic이 편향되어 있어도 human anchor가 있으면 보정된다.
+- PPI는 mean, quantile, regression coefficient 등으로 확장된다. 신뢰구간은 human anchor의 불확실성을 반영한다.
+- **중요:** synthetic 표본이 target population과 같은 분포가 아니면 PPI만으로는 부족하다. **post-stratification/raking**으로 target population에 맞춰야 한다.
+
+### 9.4 Rectification: human label을 어디에 쓸 것인가
+
+Krsteski et al.(2026)의 핵심:
+
+- human label을 모두 fine-tuning에 쓰면 rectification에 쓸 표본이 줄어든다.
+- **대부분을 rectification에 배분**하고, fine-tuning은 소량만.
+- rectification은 synthetic estimate의 **population-level bias**를 보정한다.
+- 결과: bias <5%, effective sample size +14% (그들의 실험 기준).
+
+실무적으로는:
+
+1. human anchor를 **calibration set**과 **validation set**으로 나눈다.
+2. calibration set에서 synthetic-human 차이를 추정한다. (mean bias, subgroup bias, scale bias)
+3. validation set에서 보정 후 성능을 확인한다. (bias, RMSE, coverage)
+4. subgroup별 bias가 다르면 **group-specific calibration**을 한다. (단, 셀별 n 확보)
+
+### 9.5 시장규모(market size)에 쓰려면
+
+시장규모는 "설문 평균"이 아니라 **인구 × 발생률 × 채택률 × 가격**의 곱이다. synthetic persona 별점만으로 TAM/SAM/SOM을 추정하면 안 된다.
+
+권장:
+
+- **Bottom-up TAM/SAM/SOM**:
+  - TAM = target population × category incidence × annual spend
+  - SAM = TAM × serviceable geography/channel/price
+  - SOM = SAM × realistic adoption (analog products, pre-orders, waitlist, conjoint)
+- **Conjoint/choice experiment**는 인간 표본으로 추정한다. synthetic은 attribute/level pretest와 가설 생성에 쓴다.
+- synthetic으로 segment **상대** 선호를 추정하고, human anchor로 **절대** 수준을 보정한다.
+- **Bayesian updating**: synthetic prior + human likelihood → posterior. 의사결정은 posterior의 lower bound로.
+- **Value of Information**: human data를 더 모을 가치가 있는지 계산한다.
+
+### 9.6 정책(policy)에 쓰려면
+
+- 정책 결정은 **대표성 있는 인간 조사 + 인과설계**가 필요하다. synthetic은 다음에 쓴다:
+  - 메시지/프레임 pretest
+  - 이질적 효과(heterogeneous treatment effect) 가설 생성
+  - stakeholder/이해관계자 매핑
+  - 설문 문항/선택지 pre-test
+- 최종 정책 추정에는 **MRP(multilevel regression and post-stratification)**, **small-area estimation**, **PPI**를 사용하되, human survey를 anchor로 둔다.
+- **분배적 영향**은 실제 microdata가 필요하다. synthetic persona로 대체하지 마라.
+- **deliberative polling**/공론조사는 인간 참여가 필수다. synthetic은 사전 시나리오 생성에만.
+
+### 9.7 검증 지표와 의사결정 규칙
+
+| 차원 | 지표 | 통과 기준(예시) |
+|---|---|---|
+| Predictive | RMSE, Pearson r, MAE | human holdout에서 r > 0.5, MAE < 0.5 scale point |
+| Distributional | mean bias, SD ratio, KS, Wasserstein | mean bias < 0.2 SD, SD ratio 0.8–1.2 |
+| Substantive | subgroup ordering, regression coefficients, predictor ranking | 주요 subgroup ordering 일치, coefficient sign 일치 |
+| Calibration | PPI/rectified CI coverage | 95% CI coverage ≥ 90% (simulation) |
+| Robustness | model/seed/prompt variation | 결론이 뒤집히지 않음 |
+
+**의사결정 규칙:** bias-corrected 95% CI의 lower bound가 decision threshold를 넘지 못하면, 결론을 내리지 말고 human data를 추가한다. "점추정이 threshold를 넘었다"는 이유로 결정하면 안 된다.
+
+### 9.8 최소 프로토콜 (별점 시뮬레이션)
+
+1. target population과 estimand를 고정한다. (예: "서울 20–39세 여성의 이 교육 프로그램 추천 의향 평균")
+2. human anchor 100–300명을 모집한다. 같은 자극, 같은 별점, 같은 covariate.
+3. synthetic 5k–50k를 2개 모델 × 3 seeds로 생성한다.
+4. calibration set/validation set으로 human anchor를 나눈다.
+5. **PPI + post-stratification**으로 bias-corrected estimate와 95% CI를 계산한다.
+6. subgroup은 cell n≥30을 확보한 것만 보고한다.
+7. synthetic-human 상관이 낮거나 CI가 너무 넓으면, **"탐색적"**으로만 보고한다.
+8. 결과 보고서에 **synthetic 비율, human anchor 크기, calibration 방법, coverage, 한계**를 명시한다.
+
+### 9.9 참고 문헌
+
+- Pew Research Center (2026). *Can AI Stand In for Human Survey-Takers? Not Really.* https://www.pewresearch.org/data-labs/2026/09/30/can-ai-stand-in-for-human-survey-takers-not-really/
+- Pew Research Center (2026). *Methodology: Silicon Samples.* https://www.pewresearch.org/data-labs/2026/09/30/methodology-silicon-samples/
+- Krsteski, Russo, Chang, West, Gligorić (2026). *Valid Survey Simulations with Limited Human Data: The Roles of Prompting, Fine-Tuning, and Rectification.* ACL 2026. https://arxiv.org/abs/2510.11408
+- D’Ecclesiis, Castellacci, Ahmadi (2026). *Validating LLM-Generated Synthetic Survey Samples: A Use-Dependent Multi-Dimensional Framework.* https://arxiv.org/abs/2611.00256
+- Angelopoulos et al. (2023). *Prediction-Powered Inference.* Science. https://arxiv.org/abs/2301.09633
+- Argyle et al. (2023). *Out of One, Many: Using Language Models to Simulate Human Samples.* Political Analysis.
+
+## 10. 라이선스 주의
 
 - Nemotron-Personas: 데이터셋별 카드 확인 (상업적 사용 가능으로 홍보되는 버전 있음).
 - PersonaFeedback: CC BY 4.0 (arXiv 기준).
