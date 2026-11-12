@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MathLens — 문장제를 만지는 막대 모델로</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Processing visualization · Python core</p>
+        <h1>MathLens</h1>
+      </div>
+      <p class="tagline">문장제를 <strong>조작 가능한 막대 모델</strong>로 번역합니다. AI는 정답을 말하지 않습니다.</p>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <label class="label" for="problem">문장제</label>
+        <textarea id="problem" rows="5">사과가 귤보다 3개 더 많습니다. 귤은 5개입니다. 사과는 몇 개일까요?</textarea>
+        <div class="row">
+          <button id="analyze" class="primary">분석</button>
+          <button id="hint">힌트</button>
+          <span id="status" class="status" role="status"></span>
+        </div>
+        <p class="hint-text">
+          팁: 로컬 LLM이 없으면 mock 모드로 동작합니다. <code>LLM_MODE=ollama</code>로 바꾸면
+          실제 구조화가 켜집니다.
+        </p>
+      </section>
+
+      <section class="panel viz">
+        <div id="canvas-wrap" aria-label="막대 모델 시각화"></div>
+        <div class="controls">
+          <label class="slider-label">
+            <span id="answer-label">답</span>
+            <input id="answer" type="range" min="0" max="20" value="0" step="1" />
+            <span id="answer-value" class="value">0</span>
+          </label>
+          <button id="check">확인</button>
+          <span id="feedback" class="feedback" role="status"></span>
+        </div>
+        <div id="hint-box" class="hint-box" hidden></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Processing(p5.js)는 시각화·상호작용, Python은 LLM·검증·로그를 담당합니다.</span>
+      <span id="session"></span>
+    </footer>
+
+    <script src="sketch.js"></script>
+  </body>
+</html>
